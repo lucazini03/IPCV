@@ -351,28 +351,29 @@ def evaluate(scenes,
 # Random search
 def random_search(param_grid, out_file, max_evals):
     """Random search for hyperparameter optimization"""
-    
-    # Dataframe for results
-    results = pd.DataFrame(columns = ['score', 'params', 'iteration'],
-                                  index = list(range(max_evals)))
 
-    # Keep searching until reach max evaluations
-    for i in range(max_evals):
+    results = []
 
-        # Choose random hyperparameters
-        hyperparameters = {k: random.sample(v, 1)[0] for k, v in param_grid.items()}
-        
-        print(f'Random eval {i+1}: {hyperparameters}', flush=True)
+    try:
+        for i in range(max_evals):
+            # Choose random hyperparameters
+            hyperparameters = {k: random.sample(v, 1)[0] for k, v in param_grid.items()}
+            
+            print(f'Random eval {i+1}: {hyperparameters}', flush=True)
 
-        # Evaluate randomly selected hyperparameters
-        eval_results = evaluate((easy_scene_paths, hard_scene_paths + impossible_scene_paths), imgs_model, hyperparameters)
+            # Evaluate randomly selected hyperparameters
+            eval_results = evaluate((easy_scene_paths, hard_scene_paths + impossible_scene_paths), imgs_model, hyperparameters)
 
-        results.loc[i, :] = eval_results, hyperparameters, i
-    
+            results.append({'score': eval_results, 'params': hyperparameters, 'iteration': i})
+    except KeyboardInterrupt:
+        print("Random search interrupted", flush=True)
+
+    # Create DataFrame from results
+    df_results = pd.DataFrame(results)
     # Sort with best score on top
-    results.sort_values('score', ascending = False, inplace = True)
-    results.reset_index(inplace = True)
-    return results 
+    df_results.sort_values('score', ascending=False, inplace=True)
+    df_results.reset_index(drop=True, inplace=True)
+    return df_results
 
 def main():
     MAX_EVALS = 300
