@@ -271,10 +271,10 @@ def locate_books_in_scene_JJJJ(img_scene_path:str,
 # Param grid
 param_grid = {
     'sift_nfeatures': [0],
-    'sift_nOctaveLayers': list(range(3, 5)),
+    'sift_nOctaveLayers': list(range(3, 6)),
     'sift_contrastThreshold': list(np.linspace(0.02, 0.06, 100)),
     'sift_edgeThreshold': list(np.linspace(5, 15, 100)),
-    'sift_sigma': list(np.linspace(0.4, 0.8, 100)),
+    'sift_sigma': list(np.linspace(0.4, 1, 100)),
     'min_match_count': list(range(40, 60)),
     'good_matches_threshold': list(np.linspace(0.6, 0.9, 100)),
     'mask_scale': [1]   
@@ -364,7 +364,10 @@ def random_search(param_grid, out_file, max_evals):
             # Evaluate randomly selected hyperparameters
             eval_results = evaluate((easy_scene_paths, hard_scene_paths + impossible_scene_paths), imgs_model, hyperparameters)
 
-            results.append({'score': eval_results, 'params': hyperparameters, 'iteration': i})
+            # Flatten hyperparameters into separate columns
+            result_row = {'score': eval_results, 'iteration': i}
+            result_row.update(hyperparameters)
+            results.append(result_row)
     except KeyboardInterrupt:
         print("Random search interrupted", flush=True)
 
@@ -376,7 +379,7 @@ def random_search(param_grid, out_file, max_evals):
     return df_results
 
 def main():
-    MAX_EVALS = 300
+    MAX_EVALS = 500
 
     out_dir = 'results'
     os.makedirs(out_dir, exist_ok=True)
