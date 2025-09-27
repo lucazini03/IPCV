@@ -138,7 +138,7 @@ def locate_book_from_scene_kp_desc(img_model,
 
     instance = None
 
-    good_matches_threshold = hyp_params.get('good_matches_threshold', 0.75)
+    good_matches_threshold = hyp_params.get('good_matches_threshold', 0.7)
     min_match_count = hyp_params.get('min_match_count', 50)
 
     # Finding matches using KNN
@@ -268,25 +268,13 @@ def locate_books_in_scene_JJJJ(img_scene_path:str,
 
     return books_instances
 
-# Param grid
-param_grid = {
-    'sift_nfeatures': [0],
-    'sift_nOctaveLayers': list(range(3, 6)),
-    'sift_contrastThreshold': list(np.linspace(0.02, 0.06, 100)),
-    'sift_edgeThreshold': list(np.linspace(5, 15, 100)),
-    'sift_sigma': list(np.linspace(0.4, 1, 100)),
-    'min_match_count': list(range(40, 60)),
-    'good_matches_threshold': list(np.linspace(0.6, 0.9, 100)),
-    'mask_scale': [1]   
-}
-
 # Evaluate function
 def evaluate(scenes,
              models,
              params:dict={},
              MAX_ERRORS = 25):
 
-    result = {"value": None}
+    result = {"value": None, "easy_error": False}
 
     def target():
         try:
@@ -324,8 +312,9 @@ def evaluate(scenes,
 
                     if expected_count != len(instances) and i < len(easy_scenes):
                         print(f'\tError in a easy scene :(', flush=True)
-                        result["value"] = 2 * MAX_ERRORS
-                        return
+                        result['easy_error'] = True
+                        # result["value"] = 2 * MAX_ERRORS
+                        # return
 
                     errors += abs(expected_count - len(instances))
 
@@ -338,18 +327,19 @@ def evaluate(scenes,
             result["value"] = errors
         except Exception as e:
             print("\tSomething went wrong", flush=True)
-            result["value"] = 4 * MAX_ERRORS
+            result["value"] = 404
+            return
 
     thread = threading.Thread(target=target)
     thread.start()
-    thread.join(timeout=100)
+    thread.join(timeout=120)
     if thread.is_alive():
         print("\tTimeout", flush=True)
-        return 3 * MAX_ERRORS
-    return result["value"]
+        return (3 * MAX_ERRORS, result["easy_error"])
+    return (result["value"], result["easy_error"])
 
 # Random search
-def random_search(param_grid, out_file, max_evals):
+def random_search(param_grid, max_evals):
     """Random search for hyperparameter optimization"""
 
     results = []
@@ -362,10 +352,10 @@ def random_search(param_grid, out_file, max_evals):
             print(f'Random eval {i+1}: {hyperparameters}', flush=True)
 
             # Evaluate randomly selected hyperparameters
-            eval_results = evaluate((easy_scene_paths, hard_scene_paths + impossible_scene_paths), imgs_model, hyperparameters)
+            score, easy_error = evaluate((easy_scene_paths, hard_scene_paths + impossible_scene_paths), imgs_model, hyperparameters)
 
             # Flatten hyperparameters into separate columns
-            result_row = {'score': eval_results, 'iteration': i}
+            result_row = {'score': score, 'easy_error': easy_error, 'iteration': i}
             result_row.update(hyperparameters)
             results.append(result_row)
     except KeyboardInterrupt:
@@ -378,20 +368,84 @@ def random_search(param_grid, out_file, max_evals):
     df_results.reset_index(drop=True, inplace=True)
     return df_results
 
+# Grid search
+def grid_search(param_grid):
+    """Grid search for hyperparameter optimization"""
+
+    results = []
+
+    # Create all combinations of hyperparameters
+    keys, values = zip(*param_grid.items())
+    param_combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
+
+    print(f'Total combinations: {len(param_combinations)}', flush=True)
+
+    try:
+        for i, hyperparameters in enumerate(param_combinations):
+            print(f'Grid eval {i+1}/{len(param_combinations)}: {hyperparameters}', flush=True)
+
+            # Evaluate current hyperparameters
+            score, easy_error = evaluate((easy_scene_paths, hard_scene_paths + impossible_scene_paths), imgs_model, hyperparameters)
+
+            # Flatten hyperparameters into separate columns
+            result_row = {'score': score, 'easy_error': easy_error, 'iteration': i}
+            result_row.update(hyperparameters)
+            results.append(result_row)
+    except KeyboardInterrupt:
+        print("Grid search interrupted", flush=True)
+
+    # Create DataFrame from results
+    df_results = pd.DataFrame(results)
+    # Sort with best score on top
+    df_results.sort_values('score', ascending=False, inplace=True)
+    df_results.reset_index(drop=True, inplace=True)
+    return df_results
+
+# Param grid
+param_grid = {
+    # 'sift_nfeatures': [0],
+    'sift_nOctaveLayers': list(range(3, 8)),
+    # 'sift_contrastThreshold': list(np.linspace(0.02, 0.06, 100)),
+    # 'sift_edgeThreshold': list(np.linspace(5, 15, 100)),
+    'sift_sigma': list(np.linspace(0.4, 1.4, 11)),
+    'min_match_count': list(range(10, 61, 10)),
+    # 'good_matches_threshold': list(np.linspace(0.6, 0.8, 5)),
+    # 'mask_scale': [1]   
+}
+
+# Set random seed for reproducibility
+cv2.setRNGSeed(33)
+
 def main():
+    GRID = True
+    RANDOM = not GRID
     MAX_EVALS = 500
 
     out_dir = 'results'
     os.makedirs(out_dir, exist_ok=True)
 
-    out_file = f'random_search_{time()}.csv'
+    if GRID:
+        print("Starting Grid Search", flush=True)
 
-    out_path = os.path.join(out_dir, out_file)
+        out_file = f'grid_search_{time()}.csv'
 
-    random_results = random_search(param_grid, out_path, MAX_EVALS)
+        grid_search_results = grid_search(param_grid)
 
-    # save random_results to csv
-    random_results.to_csv(out_path, index=False)
+        grid_search_results.to_csv(os.path.join(out_dir, out_file), index=False)
+    
+    if RANDOM:
+        print("Starting Random Search", flush=True)
+
+        out_file = f'random_search_{time()}.csv'
+
+        random_results = random_search(param_grid, MAX_EVALS)
+
+        # save random_results to csv
+        random_results.to_csv(os.path.join(out_dir, out_file), index=False)
+
+
+
+
 
 if __name__ == "__main__":
     main()
